@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>USB Camera Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+            height: 100vh;
+            width: 100vw;
+        }
+        
+        #videoContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        #controls {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 5px;
+            pointer-events: auto;
+            z-index: 100;
+        }
+        
+        .controls-visible {
+            opacity: 1 !important;
+        }
+        
+        #cameraSelect {
+            padding: 5px;
+            border-radius: 3px;
+            border: 1px solid #555;
+            background-color: #333;
+            color: white;
+            min-width: 200px;
+        }
+        
+        #volumeSlider {
+            width: 200px;
+        }
+        
+        #fullscreenBtn {
+            padding: 5px 10px;
+            border-radius: 3px;
+            border: none;
+            background-color: #444;
+            color: white;
+            cursor: pointer;
+        }
+        
+        #fullscreenBtn:hover {
+            background-color: #555;
+        }
+        
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div id="videoContainer">
+        <video id="video" autoplay playsinline></video>
+        <div id="controls">
+            <div class="control-group">
+                <label for="cameraSelect">Camera:</label>
+                <select id="cameraSelect"></select>
+            </div>
+            <div class="control-group">
+                <label for="volumeSlider">Volume:</label>
+                <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1">
+            </div>
+            <button id="fullscreenBtn">Fullscreen (F)</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const video = document.getElementById('video');
+            const cameraSelect = document.getElementById('cameraSelect');
+            const volumeSlider = document.getElementById('volumeSlider');
+            const fullscreenBtn = document.getElementById('fullscreenBtn');
+            const videoContainer = document.getElementById('videoContainer');
+            const controls = document.getElementById('controls');
+            
+            let currentStream = null;
+            let mouseMoveTimer = null;
+            const MOUSE_HIDE_DELAY = 2000; // 2 seconds
+            
+            // Initialize camera selection
+            async function initCameraSelection() {
+                try {
+                    const devices = await navigator.mediaDevices.enumerateDevices();
+                    const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                    
+                    cameraSelect.innerHTML = '';
+                    
+                    if (videoDevices.length === 0) {
+                        cameraSelect.disabled = true;
+                        cameraSelect.innerHTML = '<option>No cameras found</option>';
+                        return;
+                    }
+                    
+                    videoDevices.forEach(device => {
+                        const option = document.createElement('option');
+                        option.value = device.deviceId;
+                        option.text = device.label || `Camera ${cameraSelect.length + 1}`;
+                        cameraSelect.appendChild(option);
+                    });
+                    
+                    // Start with first camera by default
+                    if (videoDevices.length > 0) {
+                        startStream(videoDevices[0].deviceId);
+                    }
+                } catch (err) {
+                    console.error('Error enumerating devices:', err);
+                }
+            }
+            
+            // Start video stream
+            async function startStream(deviceId) {
+                if (currentStream) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                }
+                
+                try {
+                    const constraints = {
+                        video: {
+                            deviceId: deviceId ? { exact: deviceId } : undefined,
+                            width: { ideal: 4096 },
+                            height: { ideal: 2160 }
+                        },
+                        audio: false
+                    };
+                    
+                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                    video.srcObject = stream;
+                    currentStream = stream;
+                    
+                    // Adjust video sizing after stream starts
+                    video.onloadedmetadata = () => {
+                        video.style.objectFit = 'cover';
+                    };
+                } catch (err) {
+                    console.error('Error accessing camera:', err);
+                    alert(`Could not access the camera: ${err.message}`);
+                }
+            }
+            
+            // Handle camera selection change
+            cameraSelect.addEventListener('change', () => {
+                startStream(cameraSelect.value);
+            });
+            
+            // Handle volume change
+            volumeSlider.addEventListener('input', () => {
+                video.volume = volumeSlider.value;
+            });
+            
+            // Handle fullscreen
+            fullscreenBtn.addEventListener('click', toggleFullscreen);
+            
+            function toggleFullscreen() {
+                if (!document.fullscreenElement) {
+                    videoContainer.requestFullscreen().catch(err => {
+                        console.error('Error attempting to enable fullscreen:', err);
+                    });
+                } else {
+                    document.exitFullscreen();
+                }
+            }
+            
+            // Keyboard shortcut for fullscreen
+            document.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'f') {
+                    toggleFullscreen();
+                }
+            });
+            
+            // Mouse movement detection for controls visibility
+            function showControls() {
+                controls.classList.add('controls-visible');
+                resetMouseTimer();
+            }
+            
+            function hideControls() {
+                controls.classList.remove('controls-visible');
+            }
+            
+            function resetMouseTimer() {
+                if (mouseMoveTimer) {
+                    clearTimeout(mouseMoveTimer);
+                }
+                mouseMoveTimer = setTimeout(hideControls, MOUSE_HIDE_DELAY);
+            }
+            
+            document.addEventListener('mousemove', () => {
+                showControls();
+            });
+            
+            // Initialize
+            initCameraSelection();
+            
+            // Set initial volume
+            video.volume = 1;
+        });
+    </script>
+</body>
+</html>
